@@ -21,12 +21,37 @@
         };
       in
       with pkgs;
+      let
+        alass = rustPlatform.buildRustPackage rec {
+          pname = "alass";
+          version = "2.0.0";
+
+          src = self;
+          cargoLock = {
+            lockFile = src + "/Cargo.lock";
+          };
+
+          nativeBuildInputs = [ makeWrapper ];
+
+          doCheckPhase = false;
+
+          postInstall = ''
+            wrapProgram "$out/bin/alass-cli" --prefix PATH : "${lib.makeBinPath [ ffmpeg ]}"
+          '';
+
+          meta.mainProgram = "alass-cli";
+        };
+      in
       {
         devShells.default = mkShell {
           buildInputs = [
             cargo
             rustfmt
           ];
+        };
+        packages = {
+          inherit alass;
+          default = alass;
         };
       }
     );
