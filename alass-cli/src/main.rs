@@ -81,21 +81,18 @@ fn unpack_optional_clap_number_usize(
     matches: &clap::ArgMatches,
     parameter_name: &'static str,
 ) -> Result<Option<usize>, InputArgumentsError> {
-    
     match matches.value_of(parameter_name) {
         None => Ok(None),
-        Some(parameter_value_str) => {
-            usize::from_str(parameter_value_str)
-                .with_context(|_| {
-                    InputArgumentsErrorKind::ArgumentParseError {
-                        argument_name: parameter_name.to_string(),
-                        value: parameter_value_str.to_string(),
-                    }
-                    .into()
-                })
-                .map(|v| Some(v))
-                .map_err(|e| InputArgumentsError::from(e))
-        }
+        Some(parameter_value_str) => usize::from_str(parameter_value_str)
+            .with_context(|_| {
+                InputArgumentsErrorKind::ArgumentParseError {
+                    argument_name: parameter_name.to_string(),
+                    value: parameter_value_str.to_string(),
+                }
+                .into()
+            })
+            .map(|v| Some(v))
+            .map_err(|e| InputArgumentsError::from(e)),
     }
 }
 
@@ -104,7 +101,7 @@ pub fn get_encoding(opt: Option<&str>) -> Option<&'static Encoding> {
         None | Some("auto") => {
             // use automatic detection
             None
-        },
+        }
         Some(label) => {
             match Encoding::for_label_no_replacement(label.as_bytes()) {
                 None => {
@@ -281,7 +278,7 @@ fn parse_args() -> Result<Arguments, InputArgumentsError> {
         } else {
             Some(speed_optimization)
         },
-        audio_index: unpack_optional_clap_number_usize(&matches, "audio-index")?
+        audio_index: unpack_optional_clap_number_usize(&matches, "audio-index")?,
     })
 }
 

@@ -292,10 +292,11 @@ impl VideoFileHandler {
 
         let chunk_processor = video_decoder::ChunkedAudioReceiver::new(80, vad_processor);
 
-        let vad_buffer = video_decoder::VideoDecoder::decode(file_path, audio_index, chunk_processor, video_decode_progress)
-            .with_context(|_| InputVideoErrorKind::FailedToDecode {
-                path: PathBuf::from(file_path),
-            })?;
+        let vad_buffer =
+            video_decoder::VideoDecoder::decode(file_path, audio_index, chunk_processor, video_decode_progress)
+                .with_context(|_| InputVideoErrorKind::FailedToDecode {
+                    path: PathBuf::from(file_path),
+                })?;
 
         let mut voice_segments: Vec<(i64, i64)> = Vec::new();
         let mut voice_segment_start: i64 = 0;
@@ -373,9 +374,11 @@ impl InputFileHandler {
             }
         }
 
-        return Ok(VideoFileHandler::open_video_file(file_path, audio_index, video_decode_progress)
-            .map(|v| InputFileHandler::Video(v))
-            .with_context(|_| InputFileErrorKind::VideoFile(file_path.to_path_buf()))?);
+        return Ok(
+            VideoFileHandler::open_video_file(file_path, audio_index, video_decode_progress)
+                .map(|v| InputFileHandler::Video(v))
+                .with_context(|_| InputFileErrorKind::VideoFile(file_path.to_path_buf()))?,
+        );
     }
 
     pub fn into_subtitle_file(self) -> Option<SubtitleFile> {
