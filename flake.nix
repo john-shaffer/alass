@@ -39,7 +39,12 @@
             wrapProgram "$out/bin/alass-cli" --prefix PATH : "${lib.makeBinPath [ ffmpeg ]}"
           '';
 
-          meta.mainProgram = "alass-cli";
+          meta = {
+            description = "Automatic Language-Agnostic Subtitles Synchronization";
+            homepage = "https://github.com/john-shaffer/alass";
+            license = lib.licenses.gpl3Plus;
+            mainProgram = "alass-cli";
+          };
         };
       in
       {
