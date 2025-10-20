@@ -872,6 +872,7 @@ fn perform_vad(movie: &database::Movie, cache: TCache) -> Result<Vec<Span>, TopL
         None => {
             let video_file_handler: VideoFileHandler = VideoFileHandler::open_video_file(
                 movie.path.as_path(),
+                None,
                 NoProgressInfo {},
                 /*ProgressInfo::new(
                     500,
