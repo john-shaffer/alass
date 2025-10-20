@@ -9,4 +9,5 @@ data
 *.rs.bk
 videos.list
 generated-data
+result
 test_data
