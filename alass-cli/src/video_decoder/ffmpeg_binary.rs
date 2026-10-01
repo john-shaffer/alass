@@ -40,6 +40,40 @@ struct Stream {
     /// `.mkv` does not store the duration in the streams; we have to use `format -> duration` instead
     pub duration: Option<String>,
     pub codec_type: CodecType,
+    #[serde(default)]
+    pub disposition: Disposition,
+    #[serde(default)]
+    pub tags: Tags,
+}
+
+impl Stream {
+    fn is_commentary(&self) -> bool {
+        self.disposition.comment == 1
+            || self
+                .tags
+                .title
+                .as_ref()
+                .map_or(false, |title| title.to_lowercase().contains("commentary"))
+    }
+
+    fn is_english(&self) -> bool {
+        self.tags.language.as_ref().map_or(false, |lang| {
+            lang.eq_ignore_ascii_case("eng") || lang.eq_ignore_ascii_case("en")
+        })
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct Disposition {
+    pub default: u8,
+    pub comment: u8,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Tags {
+    pub language: Option<String>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,14 +88,16 @@ struct Metadata {
     format: Option<Format>,
 }
 
-/// Picks the stream at `audio_index`, or the best audio stream if no index is given.
+/// Picks the stream at `audio_index`, or the best audio stream if no index is given: the
+/// subtitles were most likely timed to the main track, so prefer non-commentary, then the default
+/// track, then English, then the first in the file.
 fn select_audio_stream(streams: Vec<Stream>, audio_index: Option<usize>) -> Option<Stream> {
     let mut audio_streams = streams
         .into_iter()
         .filter(|s| s.codec_type == CodecType::Audio && s.channels.is_some());
 
     match audio_index {
-        None => audio_streams.min_by_key(|s| s.channels.unwrap()),
+        None => audio_streams.min_by_key(|s| (s.is_commentary(), s.disposition.default != 1, !s.is_english())),
         Some(ai) => audio_streams.find(|s| s.index == ai),
     }
 }
@@ -197,7 +233,7 @@ impl VideoDecoderFFmpegBinary {
             OsString::from("-v"),
             OsString::from("error"),
             OsString::from("-show_entries"),
-            OsString::from("format=duration:stream=index,codec_long_name,channels,duration,codec_type"),
+            OsString::from("format=duration:stream=index,codec_long_name,channels,duration,codec_type:stream_disposition=default,comment:stream_tags=language,title"),
             OsString::from("-of"),
             OsString::from("json"),
             OsString::from(file_path.as_ref()),
@@ -435,5 +471,87 @@ impl VideoDecoderFFmpegBinary {
             .with_context(|_| DecoderErrorKind::DeserializingMetadataFailed { path: file_path })?;
 
         Ok(metadata)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parses `streams` as ffprobe would print them and returns the index of the selected stream.
+    fn select(streams: &str, audio_index: Option<usize>) -> Option<usize> {
+        let metadata: Metadata = serde_json::from_str(&format!(r#"{{"streams": [{}]}}"#, streams)).unwrap();
+        select_audio_stream(metadata.streams, audio_index).map(|s| s.index)
+    }
+
+    const VIDEO: &str = r#"{"index": 0, "codec_long_name": "H.264", "codec_type": "video"}"#;
+
+    fn audio(index: usize, channels: usize, default: u8, comment: u8, tags: &str) -> String {
+        format!(
+            r#"{{"index": {}, "codec_long_name": "AAC", "codec_type": "audio", "channels": {},
+                "disposition": {{"default": {}, "comment": {}}}, "tags": {{{}}}}}"#,
+            index, channels, default, comment, tags
+        )
+    }
+
+    #[test]
+    fn prefers_default_over_stereo_commentary() {
+        let streams = [
+            VIDEO.to_string(),
+            audio(1, 6, 1, 0, r#""language": "eng""#),
+            audio(2, 2, 0, 1, r#""language": "eng""#),
+        ];
+        assert_eq!(select(&streams.join(","), None), Some(1));
+    }
+
+    #[test]
+    fn prefers_default_over_english() {
+        let streams = [
+            VIDEO.to_string(),
+            audio(1, 2, 0, 0, r#""language": "eng""#),
+            audio(2, 6, 1, 0, r#""language": "jpn""#),
+        ];
+        assert_eq!(select(&streams.join(","), None), Some(2));
+    }
+
+    #[test]
+    fn prefers_english_without_default() {
+        let streams = [
+            VIDEO.to_string(),
+            audio(1, 2, 0, 0, r#""language": "spa""#),
+            audio(2, 6, 0, 0, r#""language": "eng""#),
+        ];
+        assert_eq!(select(&streams.join(","), None), Some(2));
+    }
+
+    #[test]
+    fn skips_commentary_identified_by_title() {
+        let streams = [
+            VIDEO.to_string(),
+            audio(1, 2, 1, 0, r#""language": "eng", "title": "Director's Commentary""#),
+            audio(2, 6, 0, 0, r#""language": "eng", "title": "Surround 5.1""#),
+        ];
+        assert_eq!(select(&streams.join(","), None), Some(2));
+    }
+
+    #[test]
+    fn takes_first_audio_stream_without_metadata() {
+        let streams = [
+            VIDEO,
+            r#"{"index": 1, "codec_long_name": "AC-3", "codec_type": "audio", "channels": 6}"#,
+            r#"{"index": 2, "codec_long_name": "AAC", "codec_type": "audio", "channels": 2}"#,
+        ];
+        assert_eq!(select(&streams.join(","), None), Some(1));
+    }
+
+    #[test]
+    fn honors_audio_index() {
+        let streams = [
+            VIDEO.to_string(),
+            audio(1, 6, 1, 0, r#""language": "eng""#),
+            audio(2, 2, 0, 1, r#""language": "eng""#),
+        ];
+        assert_eq!(select(&streams.join(","), Some(2)), Some(2));
+        assert_eq!(select(&streams.join(","), Some(0)), None);
     }
 }
