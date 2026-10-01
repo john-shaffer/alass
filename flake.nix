@@ -33,7 +33,8 @@
 
           nativeBuildInputs = [ makeWrapper ];
 
-          doCheckPhase = false;
+          # Tests run in `checks.test` instead.
+          doCheck = false;
 
           postInstall = ''
             wrapProgram "$out/bin/alass-cli" --prefix PATH : "${lib.makeBinPath [ ffmpeg ]}"
@@ -57,7 +58,6 @@
             set -e
             runHook postBuild
           '';
-          doCheck = false;
           installPhase = ''
             mkdir -p "$out"
             cp test.log status "$out/"
