@@ -46,16 +46,42 @@
             mainProgram = "alass-cli";
           };
         };
+        # Always succeeds so that the log is cached; `checks.test` decides pass/fail.
+        test-report = alass.overrideAttrs {
+          pname = "alass-test-report";
+          buildPhase = ''
+            runHook preBuild
+            set +e
+            cargo test --release --offline --workspace 2>&1 | tee test.log
+            echo "''${PIPESTATUS[0]}" > status
+            set -e
+            runHook postBuild
+          '';
+          doCheck = false;
+          installPhase = ''
+            mkdir -p "$out"
+            cp test.log status "$out/"
+          '';
+          dontFixup = true;
+        };
       in
       {
+        checks.test = runCommand "alass-test" { } ''
+          if [ "$(cat ${test-report}/status)" != 0 ]; then
+            cat ${test-report}/test.log >&2
+            exit 1
+          fi
+          touch "$out"
+        '';
         devShells.default = mkShell {
           buildInputs = [
             cargo
+            just
             rustfmt
           ];
         };
         packages = {
-          inherit alass;
+          inherit alass test-report;
           default = alass;
         };
       }
