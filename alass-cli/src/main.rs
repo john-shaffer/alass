@@ -362,24 +362,18 @@ fn run() -> Result<(), failure::Error> {
 
     let mut fps_scaling_factor = 1.;
     if args.guess_fps_ratio {
-        let a = 25.;
-        let b = 24.;
-        let c = 23.976;
-        let ratios = [a / b, a / c, b / a, b / c, c / a, c / b];
-        let desc = ["25/24", "25/23.976", "24/25", "24/23.976", "23.976/25", "23.976/24"];
-
         let (opt_ratio_idx, _) = guess_fps_ratio(
             &ref_aligner_timespans,
             &inc_aligner_timespans,
-            &ratios,
+            &FPS_RATIOS,
             ProgressInfo::new(1, Some("Guessing framerate ratio...".to_string())),
         );
 
-        fps_scaling_factor = if let Some(idx) = opt_ratio_idx { ratios[idx] } else { 1. };
+        fps_scaling_factor = opt_ratio_idx.map_or(1., |idx| FPS_RATIOS[idx]);
 
         println!(
             "info: 'reference file FPS/input file FPS' ratio is {}",
-            if let Some(idx) = opt_ratio_idx { desc[idx] } else { "1" }
+            opt_ratio_idx.map_or("1", |idx| FPS_RATIO_DESCRIPTIONS[idx])
         );
         println!();
 

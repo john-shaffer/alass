@@ -402,6 +402,17 @@ impl InputFileHandler {
     }
 }
 
+/// Framerate ratios (reference FPS / input FPS) that `guess_fps_ratio` tries by default.
+pub const FPS_RATIOS: [f64; 6] = [
+    25. / 24.,
+    25. / 23.976,
+    24. / 25.,
+    24. / 23.976,
+    23.976 / 25.,
+    23.976 / 24.,
+];
+pub const FPS_RATIO_DESCRIPTIONS: [&str; 6] = ["25/24", "25/23.976", "24/25", "24/23.976", "23.976/25", "23.976/24"];
+
 pub fn guess_fps_ratio(
     ref_spans: &[alass_core::TimeSpan],
     in_spans: &[alass_core::TimeSpan],
@@ -417,7 +428,6 @@ pub fn guess_fps_ratio(
     );
     progress_handler.inc();
 
-    //let desc = ["25/24", "25/23.976", "24/25", "24/23.976", "23.976/25", "23.976/24"];
     //println!("score 1: {}", score);
 
     let (mut opt_idx, mut opt_delta, mut opt_score) = (None, delta, score);
