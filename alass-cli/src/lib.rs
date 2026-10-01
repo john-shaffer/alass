@@ -413,30 +413,26 @@ pub const FPS_RATIOS: [f64; 6] = [
 ];
 pub const FPS_RATIO_DESCRIPTIONS: [&str; 6] = ["25/24", "25/23.976", "24/25", "24/23.976", "23.976/25", "23.976/24"];
 
+/// How much better a framerate correction has to fit than no correction before it is applied.
+/// Without this, noise in the scores picks an arbitrary ratio for subtitles that already fit, so
+/// that running alass on its own output keeps stretching the subtitles.
+const FPS_RATIO_MIN_IMPROVEMENT: f64 = 0.005;
+
+/// Returns the index of the ratio in `ratios` that best fits `in_spans` to `ref_spans` (or `None`
+/// if no scaling fits best), along with the matching offset.
 pub fn guess_fps_ratio(
     ref_spans: &[alass_core::TimeSpan],
     in_spans: &[alass_core::TimeSpan],
     ratios: &[f64],
     mut progress_handler: impl alass_core::ProgressHandler,
 ) -> (Option<usize>, alass_core::TimeDelta) {
-    progress_handler.init(ratios.len() as i64);
-    let (delta, score) = alass_core::align_nosplit(
-        ref_spans,
-        in_spans,
-        alass_core::overlap_scoring,
-        alass_core::NoProgressHandler,
-    );
-    progress_handler.inc();
+    progress_handler.init(ratios.len() as i64 + 1);
 
-    //println!("score 1: {}", score);
-
-    let (mut opt_idx, mut opt_delta, mut opt_score) = (None, delta, score);
-
-    for (scale_factor_idx, scaling_factor) in ratios.iter().cloned().enumerate() {
+    let mut fit = |scaling_factor: f64| {
         let stretched_in_spans: Vec<alass_core::TimeSpan> =
             in_spans.iter().map(|ts| ts.scaled(scaling_factor)).collect();
 
-        let (delta, score) = alass_core::align_nosplit(
+        let (delta, overlap) = alass_core::align_nosplit(
             ref_spans,
             &stretched_in_spans,
             alass_core::overlap_scoring,
@@ -444,8 +440,17 @@ pub fn guess_fps_ratio(
         );
         progress_handler.inc();
 
-        //println!("score {}: {}", desc[scale_factor_idx], score);
+        // Stretching the subtitles makes them longer, which increases overlap with the reference
+        // even when they fit worse. This matters when the reference covers most of the runtime,
+        // as voice activity detection does for audio with background music.
+        (delta, overlap / scaling_factor)
+    };
 
+    let (mut opt_idx, (mut opt_delta, unscaled_score)) = (None, fit(1.));
+    let mut opt_score = unscaled_score * (1. + FPS_RATIO_MIN_IMPROVEMENT);
+
+    for (scale_factor_idx, scaling_factor) in ratios.iter().cloned().enumerate() {
+        let (delta, score) = fit(scaling_factor);
         if score > opt_score {
             opt_score = score;
             opt_idx = Some(scale_factor_idx);
@@ -481,5 +486,75 @@ pub fn print_error_chain(error: failure::Error) {
     if !show_bt {
         println!("");
         println!("not: run with environment variable 'RUST_BACKTRACE=1' for detailed stack traces");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic xorshift so the tests don't depend on `rand`'s seeding API.
+    struct Rng(u64);
+
+    impl Rng {
+        fn range(&mut self, lo: i64, hi: i64) -> i64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            lo + (self.0 % (hi - lo) as u64) as i64
+        }
+    }
+
+    fn span(start: i64, end: i64) -> AlgTimeSpan {
+        AlgTimeSpan::new(AlgTimePoint::from(start), AlgTimePoint::from(end))
+    }
+
+    /// Returns `(vad_spans, subtitle_spans)` in milliseconds for a film with music under the
+    /// dialog: the VAD reports speech for most of the runtime, while subtitles only cover actual
+    /// lines.
+    fn noisy_film(seed: u64, duration_ms: i64) -> (Vec<AlgTimeSpan>, Vec<AlgTimeSpan>) {
+        let mut rng = Rng(seed);
+        let mut vad = Vec::new();
+        let mut subs = Vec::new();
+        let mut t = 2000;
+        while t < duration_ms {
+            let len = rng.range(500, 6000);
+            vad.push(span(t, t + len));
+            if rng.range(0, 3) > 0 {
+                // a subtitle line somewhere inside this voiced region
+                let start = t + rng.range(0, len / 3);
+                let end = start + rng.range(len / 3, len - (start - t));
+                subs.push(span(start, end));
+            }
+            t += len + rng.range(30, 800);
+        }
+        (vad, subs)
+    }
+
+    fn scaled(spans: &[AlgTimeSpan], factor: f64) -> Vec<AlgTimeSpan> {
+        spans.iter().map(|ts| ts.scaled(factor)).collect()
+    }
+
+    const TWO_HOURS: i64 = 2 * 60 * 60 * 1000;
+
+    #[test]
+    fn guess_fps_ratio_finds_ratio_against_dense_vad() {
+        for seed in 1..=3 {
+            for (idx, &ratio) in FPS_RATIOS.iter().enumerate() {
+                let (vad, subs) = noisy_film(seed, TWO_HOURS);
+                let inc = scaled(&subs, 1. / ratio);
+                let (guess, _) = guess_fps_ratio(&vad, &inc, &FPS_RATIOS, NoProgressInfo {});
+                assert_eq!(guess, Some(idx), "seed {} ratio {}", seed, ratio);
+            }
+        }
+    }
+
+    #[test]
+    fn guess_fps_ratio_keeps_matching_framerate() {
+        for seed in 1..=3 {
+            let (vad, subs) = noisy_film(seed, TWO_HOURS);
+            let (guess, _) = guess_fps_ratio(&vad, &subs, &FPS_RATIOS, NoProgressInfo {});
+            assert_eq!(guess, None, "seed {}", seed);
+        }
     }
 }
