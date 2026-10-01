@@ -54,6 +54,18 @@ struct Metadata {
     format: Option<Format>,
 }
 
+/// Picks the stream at `audio_index`, or the best audio stream if no index is given.
+fn select_audio_stream(streams: Vec<Stream>, audio_index: Option<usize>) -> Option<Stream> {
+    let mut audio_streams = streams
+        .into_iter()
+        .filter(|s| s.codec_type == CodecType::Audio && s.channels.is_some());
+
+    match audio_index {
+        None => audio_streams.min_by_key(|s| s.channels.unwrap()),
+        Some(ai) => audio_streams.find(|s| s.index == ai),
+    }
+}
+
 define_error!(DecoderError, DecoderErrorKind);
 
 #[derive(Debug, Fail)]
@@ -204,25 +216,11 @@ impl VideoDecoderFFmpegBinary {
                 }
             })?;
 
-        let mut audio_streams = metadata
-            .streams
-            .into_iter()
-            .filter(|s| s.codec_type == CodecType::Audio && s.channels.is_some());
-
-        let best_stream_opt = match audio_index {
-            None => audio_streams.min_by_key(|s| s.channels.unwrap()),
-            Some(ai) => audio_streams.find(|s| s.index == ai),
-        };
-
-        let best_stream: Stream;
-        match best_stream_opt {
-            Some(x) => best_stream = x,
-            None => {
-                return Err(DecoderError::from(DecoderErrorKind::NoAudioStream {
-                    path: file_path.as_ref().into(),
-                }))
-            }
-        }
+        let best_stream = select_audio_stream(metadata.streams, audio_index).ok_or_else(|| {
+            DecoderError::from(DecoderErrorKind::NoAudioStream {
+                path: file_path.as_ref().into(),
+            })
+        })?;
 
         let ffmpeg_path: PathBuf = std::env::var_os("ALASS_FFMPEG_PATH")
             .unwrap_or(OsString::from("ffmpeg"))
